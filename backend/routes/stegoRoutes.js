@@ -10,7 +10,3 @@ const stegoRoutes = (upload) => {
 
 module.exports = stegoRoutes;
 
-
-
-
-

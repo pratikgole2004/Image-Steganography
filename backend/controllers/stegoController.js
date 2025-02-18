@@ -1,9 +1,7 @@
-
-// Working code........................
-
 const fs = require("fs");
 const crypto = require("crypto");
 const path = require("path");
+const sharp = require("sharp");
 
 // AES encryption
 const encryptMessage = (message, key) => {
@@ -22,61 +20,46 @@ const decryptMessage = (encryptedMessage, key, iv) => {
   return decryptedMessage;
 };
 
-// LSB encoding
-// const encodeMessageInImage = (imageBuffer, encryptedData) => {
-//   const { iv, encryptedMessage } = encryptedData;
-//   const payload = `${iv}:${encryptedMessage}`;
-//   const payloadBits = payload.split("").map((char) => char.charCodeAt(0).toString(2).padStart(8, "0")).join("");
-  
-//   const imageArray = Buffer.from(imageBuffer);
-//   if (payloadBits.length > imageArray.length) {
-//     throw new Error("Message is too large to fit in the image.");
-//   }
-
-//   let bitIndex = 0;
-//   for (let i = 0; i < imageArray.length && bitIndex < payloadBits.length; i++) {
-//     imageArray[i] = (imageArray[i] & 0xFE) | parseInt(payloadBits[bitIndex], 2);
-//     bitIndex++;
-//   }
-
-//   return imageArray;
-// };
-
-// 2 nd working
-
-
-const encodeMessageInImage = (imageBuffer, encryptedData) => {
+// Encode message into image
+const encodeMessageInImage = async (imagePath, encryptedData) => {
   const { iv, encryptedMessage } = encryptedData;
-  const payload = `${iv}:${encryptedMessage}`;
+  const payload = Buffer.from(`${iv}:${encryptedMessage}`).toString("base64"); // Use Base64 encoding
   const payloadBits = payload.split("").map((char) => char.charCodeAt(0).toString(2).padStart(8, "0")).join("");
 
-  const imageArray = Buffer.from(imageBuffer);
-  if (payloadBits.length > imageArray.length) {
+  const image = sharp(imagePath);
+  const { data, info } = await image.raw().toBuffer({ resolveWithObject: true });
+
+  if (payloadBits.length > data.length) {
     throw new Error("Message is too large to fit in the image.");
   }
 
-  let bitIndex = 0;
-  for (let i = 0; i < imageArray.length && bitIndex < payloadBits.length; i++) {
-    imageArray[i] = (imageArray[i] & 0xFE) | parseInt(payloadBits[bitIndex], 2);
-    bitIndex++;
+  for (let i = 0; i < payloadBits.length; i++) {
+    data[i] = (data[i] & 0xFE) | parseInt(payloadBits[i], 2);
   }
 
-  return imageArray;
+  const encodedImagePath = path.join(__dirname, "../uploads/encoded", `encoded_${Date.now()}.png`);
+  await sharp(data, { raw: { width: info.width, height: info.height, channels: info.channels } })
+    .toFormat("png")
+    .toFile(encodedImagePath);
+
+  return encodedImagePath;
 };
 
+// Decode message from image
+const decodeMessageFromImacdge = async (imagePath, key) => {
+  const image = sharp(imagePath);
+  const { data } = await image.raw().toBuffer({ resolveWithObject: true });
 
-
-// LSB decoding
-const decodeMessageFromImage = (imageBuffer, key) => {
-  const imageArray = Buffer.from(imageBuffer);
   const payloadBits = [];
-  for (let i = 0; i < imageArray.length; i++) {
-    payloadBits.push((imageArray[i] & 0x01).toString());
+  for (let i = 0; i < data.length; i++) {
+    payloadBits.push((data[i] & 0x01).toString());
   }
 
-  const payload = payloadBits.join("").match(/.{8}/g).map((byte) => String.fromCharCode(parseInt(byte, 2))).join("");
+  const binaryString = payloadBits.join("");
+  const byteArray = binaryString.match(/.{8}/g) || []; // Ensure no null values
+  const payload = Buffer.from(byteArray.map((byte) => String.fromCharCode(parseInt(byte, 2))).join(""), "base64").toString();
+
   const [iv, encryptedMessage] = payload.split(":");
-  
   if (!iv || !encryptedMessage) {
     throw new Error("Failed to decode the message. Ensure the correct key was used.");
   }
@@ -84,24 +67,18 @@ const decodeMessageFromImage = (imageBuffer, key) => {
   return decryptMessage(encryptedMessage, key, iv);
 };
 
+
 // Encode controller
-const encode = (req, res) => {
+const encode = async (req, res) => {
   const { message, key } = req.body;
   const imagePath = req.file.path;
 
-
   try {
-    const imageBuffer = fs.readFileSync(imagePath);
-    const encodedImage = encodeMessageInImage(imageBuffer, encryptMessage(message, key));
-
-    const outputPath = path.join(__dirname, "../uploads/encoded", `encoded_${Date.now()}.png`);
-    fs.writeFileSync(outputPath, encodedImage);
-
-    
+    const encodedImagePath = await encodeMessageInImage(imagePath, encryptMessage(message, key));
 
     res.json({
       message: "Image encoded successfully!",
-      imagePath: `/uploads/encoded/${path.basename(outputPath)}`,
+      imagePath: `/uploads/encoded/${path.basename(encodedImagePath)}`,
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -109,14 +86,12 @@ const encode = (req, res) => {
 };
 
 // Decode controller
-const decode = (req, res) => {
+const decode = async (req, res) => {
   const { key } = req.body;
   const imagePath = req.file.path;
 
   try {
-    const imageBuffer = fs.readFileSync(imagePath);
-    const decodedMessage = decodeMessageFromImage(imageBuffer, key);
-
+    const decodedMessage = await decodeMessageFromImage(imagePath, key);
     res.json({ decodedMessage });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -124,7 +99,3 @@ const decode = (req, res) => {
 };
 
 module.exports = { encode, decode };
-
-
-
-
