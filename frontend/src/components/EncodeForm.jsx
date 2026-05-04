@@ -6,7 +6,6 @@ const EncodeForm = () => {
   const [key, setKey] = useState("");
   const [image, setImage] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [encodedImageUrl, setEncodedImageUrl] = useState("");
   const [error, setError] = useState("");
 
   const handleFileChange = (e) => {
@@ -19,6 +18,7 @@ const EncodeForm = () => {
       setError("All fields are required.");
       return;
     }
+
     setError("");
     setLoading(true);
 
@@ -28,12 +28,27 @@ const EncodeForm = () => {
     formData.append("image", image);
 
     try {
-      const response = await axios.post("http://localhost:5000/api/steganography/encode", formData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      });
-      setEncodedImageUrl(response.data.imagePath);
+      const response = await axios.post(
+        "http://localhost:5000/api/steganography/encode",
+        formData,
+        {
+          responseType: "blob", // receive image as binary
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        }
+      );
+
+      // Trigger download
+      const blob = new Blob([response.data], { type: "image/png" });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", "encoded_image.png");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
     } catch (err) {
       setError("Error encoding the image.");
     } finally {
@@ -95,15 +110,6 @@ const EncodeForm = () => {
       color: "#003963",
       marginBottom: "20px",
     },
-    encodedImage: {
-      maxWidth: "100%", 
-      height: "auto",
-      display: "block",
-      margin: "20px 0",
-      border: "1px solid #003963",
-      padding: "10px",
-      borderRadius: "5px",
-    },
   };
 
   return (
@@ -149,14 +155,6 @@ const EncodeForm = () => {
           </button>
           {error && <p style={styles.error}>{error}</p>}
         </form>
-
-        {encodedImageUrl && (
-          <div>
-            <h3>Encoded Image</h3>
-            <img src={encodedImageUrl} alt="Encoded" style={styles.encodedImage} />
-            <a href={encodedImageUrl} download>Download Encoded Image</a>
-          </div>
-        )}
       </div>
     </div>
   );
